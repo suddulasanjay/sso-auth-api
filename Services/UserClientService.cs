@@ -47,26 +47,5 @@ namespace SSOAuthAPI.Services
 
             return requestedScopes.All(scope => storedScopes.Contains(scope));
         }
-
-        public async Task UpdateScopeIfNeeded(int userId, string appId, string requestedScope)
-        {
-            if (string.IsNullOrWhiteSpace(requestedScope))
-                return;
-
-            var entry = await _db.UserClients
-                .FirstOrDefaultAsync(uc => uc.UserId == userId && uc.AppId == appId);
-
-            if (entry == null)
-                return;
-
-            var existing = (entry.Scope ?? "").Split(" ", StringSplitOptions.RemoveEmptyEntries).ToHashSet();
-            var incoming = requestedScope.Split(" ", StringSplitOptions.RemoveEmptyEntries);
-
-            if (incoming.Any(scope => !existing.Contains(scope)))
-            {
-                entry.Scope = string.Join(" ", existing.Union(incoming));
-                await _db.SaveChangesAsync();
-            }
-        }
     }
 }

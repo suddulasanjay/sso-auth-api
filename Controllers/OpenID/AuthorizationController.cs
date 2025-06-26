@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using OpenIddict.Abstractions;
@@ -8,29 +9,37 @@ using OpenIddict.Server.AspNetCore;
 using SSOAuthAPI.Data.Entities;
 using SSOAuthAPI.Interfaces;
 using SSOAuthAPI.Models.Configuration;
+using SSOAuthAPI.Models.Security;
 using SSOAuthAPI.Utilities.Constants;
 using System.ComponentModel.DataAnnotations;
 using System.Security.Claims;
+using System.Text.Json;
 
 namespace SSOAuthAPI.Controllers.OpenID
 {
-    [Route("api/connect")]
+    [Route("api/[controller]")]
     [ApiController]
     public class AuthorizationController : ControllerBase
     {
+        private readonly IOpenIddictApplicationManager _applicationManager;
+        private readonly IOpenIddictScopeManager _scopeManager;
         private readonly IUserService _userService;
         private readonly IUserClientService _userClientService;
         private readonly IProviderUserService _providerUserService;
+        private readonly ISessionService _sessionService;
         private readonly FrontEndSettings _frontEndSettings;
-        public AuthorizationController(IUserService userService, IUserClientService userClientService, IProviderUserService providerUserService, IOptions<FrontEndSettings> frontEndSettings)
+        public AuthorizationController(IOpenIddictApplicationManager applicationManager, IOpenIddictScopeManager scopeManager, IUserService userService, IUserClientService userClientService, IProviderUserService providerUserService, ISessionService sessionService, IOptions<FrontEndSettings> frontEndSettings)
         {
+            _applicationManager = applicationManager;
+            _scopeManager = scopeManager;
             _userService = userService;
             _providerUserService = providerUserService;
             _userClientService = userClientService;
+            _sessionService = sessionService;
             _frontEndSettings = frontEndSettings.Value;
         }
 
-        [HttpGet("authorize")]
+        [HttpGet("~/connect/authorize")]
         [ProducesResponseType(302)]
         [ProducesResponseType(400)]
         public async Task<IActionResult> Authorize(
@@ -38,23 +47,33 @@ namespace SSOAuthAPI.Controllers.OpenID
         [FromQuery(Name = "redirect_uri"), Required] string redirectUri,
         [FromQuery(Name = "response_type"), Required] string responseType,
         [FromQuery(Name = "scope"), Required] string scope,
-        [FromQuery(Name = "state")] string? state,
-        [FromQuery(Name = "prompt")] string? prompt)
+        [FromQuery(Name = "state")] string? state)
         {
             var request = HttpContext.GetOpenIddictServerRequest()
                 ?? throw new InvalidOperationException("Invalid OpenID Connect request");
 
+            var requestedScopes = request.GetScopes();
+
+            if (!requestedScopes.Any())
+            {
+                return BadRequest("No scopes were requested.");
+            }
+
+            // Get the client application
+            var application = await _applicationManager.FindByClientIdAsync(request.ClientId!);
+            if (application is null)
+            {
+                return BadRequest("Invalid client ID.");
+            }
+
+            // Fetch the list of scopes assigned to the client ***important
+
             var result = await HttpContext.AuthenticateAsync(CookieAuthenticationDefaults.AuthenticationScheme);
 
-            var authId = Guid.NewGuid().ToString();
+            var authId = Request.Query["auth_id"].FirstOrDefault() ?? Guid.NewGuid().ToString();
 
             if (!result.Succeeded)
             {
-                if (prompt == "none")
-                {
-                    return Content("<script>window.parent.postMessage({ type: 'session_not_found' }, '*');</script>", "text/html");
-                }
-
                 var qs = new QueryString()
                     .Add("auth_id", authId)
                     .Add("client_id", clientId)
@@ -67,10 +86,11 @@ namespace SSOAuthAPI.Controllers.OpenID
             }
 
             // If already signed in, directly issue authorization code.
-            return await SignInUser(result.Principal, clientId, scope);
+            return await SignInUser(result, clientId, scope);
         }
 
-        [HttpPost("token")]
+        [HttpPost("~/connect/token")]
+        [Consumes("application/x-www-form-urlencoded")]
         [ProducesResponseType(typeof(OpenIddictResponse), 200)]
         [ProducesResponseType(typeof(OpenIddictResponse), 400)]
         [IgnoreAntiforgeryToken]
@@ -84,7 +104,16 @@ namespace SSOAuthAPI.Controllers.OpenID
                 var principal = (await HttpContext.AuthenticateAsync(OpenIddictServerAspNetCoreDefaults.AuthenticationScheme)).Principal
                     ?? throw new InvalidOperationException("Invalid principal");
 
+                var authId = principal.FindFirstValue(OpenIddictConstants.Claims.Private.AuthorizationId);
+                var sessionId = principal.FindFirstValue(CustomClaimTypes.SessionId);
+                await _sessionService.AddAuthorizationToSession(authId, sessionId);
+
                 return SignIn(principal, OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
+            }
+            else if (request.IsRefreshTokenGrantType())
+            {
+                var claimsPrincipal = (await HttpContext.AuthenticateAsync(OpenIddictServerAspNetCoreDefaults.AuthenticationScheme))?.Principal!;
+                return SignIn(claimsPrincipal, OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
             }
 
             return BadRequest(new { error = "unsupported_grant_type" });
@@ -95,10 +124,9 @@ namespace SSOAuthAPI.Controllers.OpenID
         {
             var props = new AuthenticationProperties
             {
-                RedirectUri = Url.Action(nameof(GoogleCallback)),
+                RedirectUri = Url.Action(nameof(GoogleCallback), values: new { returnUrl }),
             };
 
-            props.Items["returnUrl"] = returnUrl;
 
             return Challenge(props, "Google");
         }
@@ -145,13 +173,24 @@ namespace SSOAuthAPI.Controllers.OpenID
                 });
             }
 
+            //login user
+            var sessionId = await _userService.LoginUserWithSession(user);
             // Sign in with app's cookie (so OpenIddict will see the session)
             var claims = new List<Claim>
             {
-                new Claim(OpenIddictConstants.Claims.Subject, user.Id.ToString()),
-                new Claim(OpenIddictConstants.Claims.Email, user.Email),
-                new Claim(OpenIddictConstants.Claims.Name, user.FirstName)
+                new Claim(CustomClaimTypes.UserId, user.Id.ToString()),
+                new Claim(CustomClaimTypes.SessionId, sessionId.ToString())
             };
+
+            if (user.Email is { })
+            {
+                claims.Add(new Claim(ClaimTypes.Email, user.Email));
+            }
+
+            if (user.IsAdmin)
+            {
+                claims.Add(new Claim(ClaimTypes.Role, "Admin"));
+            }
 
             var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
             var principal = new ClaimsPrincipal(identity);
@@ -168,9 +207,8 @@ namespace SSOAuthAPI.Controllers.OpenID
         {
             var props = new AuthenticationProperties
             {
-                RedirectUri = Url.Action(nameof(MicrosoftCallback))
+                RedirectUri = Url.Action(nameof(MicrosoftCallback), values: new { returnUrl })
             };
-            props.Items["returnUrl"] = returnUrl;
             return Challenge(props, "Microsoft");
         }
 
@@ -196,13 +234,13 @@ namespace SSOAuthAPI.Controllers.OpenID
             var providerSubjectId = externalPrincipal.FindFirst(ClaimTypes.NameIdentifier)?.Value;
 
 
-            if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(providerSubjectId))
+            if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(providerSubjectId) || string.IsNullOrWhiteSpace(firstName) || string.IsNullOrWhiteSpace(lastName))
                 return BadRequest("Required information missing from Microsoft response.");
 
             var user = await _userService.FindByEmailAsync(email);
             if (user is null)
             {
-                user = await _userService.CreateUserAsync(email, firstName ?? "", lastName ?? "", (int)IdentityProvider.Microsoft);
+                user = await _userService.CreateUserAsync(email, firstName, lastName, (int)IdentityProvider.Microsoft);
             }
 
             var providerMappingExists = await _providerUserService.ExistsAsync((int)IdentityProvider.Microsoft, user.Id);
@@ -219,12 +257,24 @@ namespace SSOAuthAPI.Controllers.OpenID
                 });
             }
 
+            //login user
+            var sessionId = await _userService.LoginUserWithSession(user);
+            // Sign in with app's cookie (so OpenIddict will see the session)
             var claims = new List<Claim>
             {
-                new Claim(OpenIddictConstants.Claims.Subject, user.Id.ToString()),
-                new Claim(OpenIddictConstants.Claims.Email, user.Email),
-                new Claim(OpenIddictConstants.Claims.Name, user.FirstName)
+                new Claim(CustomClaimTypes.UserId, user.Id.ToString()),
+                new Claim(CustomClaimTypes.SessionId, sessionId.ToString()) //sessionId claim
             };
+
+            if (user.Email is { })
+            {
+                claims.Add(new Claim(ClaimTypes.Email, user.Email));
+            }
+
+            if (user.IsAdmin)
+            {
+                claims.Add(new Claim(ClaimTypes.Role, "Admin"));
+            }
 
             var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
             var principal = new ClaimsPrincipal(identity);
@@ -234,26 +284,84 @@ namespace SSOAuthAPI.Controllers.OpenID
             return Redirect(returnUrl ?? "/");
         }
 
-
-        private async Task<IActionResult> SignInUser(ClaimsPrincipal principal, string clientId, string scope)
+        [Authorize(AuthenticationSchemes = OpenIddictServerAspNetCoreDefaults.AuthenticationScheme)]
+        [HttpGet("~/connect/userinfo")]
+        [ProducesResponseType<UserInfoDto>(StatusCodes.Status200OK)]
+        public async Task<IActionResult> Userinfo()
         {
-            var userId = principal.FindFirstValue(CustomClaimTypes.UserId);
-            var sessionId = principal.FindFirstValue(CustomClaimTypes.SessionId);
+            bool hasProfileScope = HttpContext.User.HasClaim("scope", "profile");
+            if (!hasProfileScope)
+            {
+                return Forbid("User Info Forbidden");
+            }
+            int.TryParse(HttpContext.User.FindFirstValue(CustomClaimTypes.UserId), out var userId);
+
+            if (userId == 0)
+            {
+                return new ContentResult
+                {
+                    StatusCode = StatusCodes.Status403Forbidden,
+                    Content = JsonSerializer.Serialize(new
+                    {
+                        error = "User token needed",
+                    }),
+                    ContentType = "application/json"
+                };
+            }
+
+            var user = await _userService.FindByIdAsync(userId);
+
+            if (user is null)
+            {
+                return NotFound("No user found");
+            }
+
+            var userInfo = new UserInfoDto
+            {
+                Id = userId,
+                Email = user.Email,
+                FirstName = user.FirstName,
+                LastName = user.LastName,
+                Verified = user.Verified,
+                IsActive = user.Status == CommonStatus.Enabled
+            };
+
+            return Ok(userInfo);
+        }
+
+        [HttpGet("~/connect/logout")]
+        public async Task<IActionResult> Logout(string redirectTo = null)
+        {
+            await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+
+            return SignOut(
+                authenticationSchemes: OpenIddictServerAspNetCoreDefaults.AuthenticationScheme,
+                properties: new AuthenticationProperties
+                {
+                    RedirectUri = redirectTo ?? "/"
+                });
+        }
+
+        private async Task<IActionResult> SignInUser(AuthenticateResult result, string clientId, string scope)
+        {
+            if (result.Principal == null)
+            {
+                return Forbid("Missing user identity");
+            }
+            var authId = result.Principal.FindFirstValue(OpenIddictConstants.Claims.Private.AuthorizationId);
+            var userId = result.Principal.FindFirstValue(CustomClaimTypes.UserId);
+            var sessionId = result.Principal.FindFirstValue(CustomClaimTypes.SessionId);
 
             if (string.IsNullOrEmpty(userId) || string.IsNullOrEmpty(sessionId))
-                return Forbid("Missing user identity claims.");
-
-            var claims = new List<Claim>
             {
-                new(OpenIddictConstants.Claims.Subject, userId),
-                new(OpenIddictConstants.Claims.ClientId, clientId),
-                new(CustomClaimTypes.UserId, userId),
-                new(CustomClaimTypes.SessionId, sessionId)
-            };
+                return Forbid("Missing user identity claims.");
+            }
+
             if (!int.TryParse(userId, out var id))
             {
                 return Forbid("User ID not found");
             }
+
             var user = await _userService.FindByIdAsync(id);
             if (user == null)
             {
@@ -275,30 +383,27 @@ namespace SSOAuthAPI.Controllers.OpenID
                         Status = CommonStatus.Enabled,
                     });
                 }
-                else
-                {
-                    await _userClientService.UpdateScopeIfNeeded(id, clientId, scope);
-                }
             }
 
-            if (user.ProviderId.HasValue)
+            var claims = new List<Claim>
             {
-                var alreadyMapped = await _providerUserService.ExistsAsync(user.ProviderId.Value, user.Id);
-                if (!alreadyMapped)
-                {
-                    await _providerUserService.AddProviderUserAsync(new ProviderUser
-                    {
-                        ProviderId = user.ProviderId.Value,
-                        UserId = user.Id,
-                        Status = CommonStatus.Enabled,
-                        CreatedTime = DateTime.UtcNow,
-                        ModifiedTime = DateTime.UtcNow,
-                    });
-                }
-            }
+                new Claim(OpenIddictConstants.Claims.Subject, userId),
+                new Claim(OpenIddictConstants.Claims.ClientId, clientId),
+                new Claim(CustomClaimTypes.UserId, userId).SetDestinations(OpenIddictConstants.Destinations.AccessToken),
+                new Claim(CustomClaimTypes.SessionId, sessionId).SetDestinations(OpenIddictConstants.Destinations.AccessToken)
+            };
 
             if (!string.IsNullOrWhiteSpace(user!.Email) && scope.Contains("email"))
-                claims.Add(new Claim(OpenIddictConstants.Claims.Email, user.Email));
+            {
+                claims.Add(new Claim(OpenIddictConstants.Claims.Email, user.Email).SetDestinations(OpenIddictConstants.Destinations.AccessToken));
+            }
+
+            var role = result.Principal.FindFirstValue(ClaimTypes.Role);
+
+            if (!string.IsNullOrEmpty(role) && scope.Contains(OpenIddictConstants.Scopes.Roles))
+            {
+                claims.Add(new Claim(OpenIddictConstants.Claims.Role, role).SetDestinations(OpenIddictConstants.Destinations.AccessToken));
+            }
 
 
             var identity = new ClaimsIdentity(claims, OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);

@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.EntityFrameworkCore;
 using OpenIddict.Abstractions;
 using SSOAuthAPI.Data;
+using SSOAuthAPI.Filters;
 using SSOAuthAPI.Interfaces;
 using SSOAuthAPI.Models.Configuration;
 using SSOAuthAPI.Services;
@@ -20,11 +21,14 @@ namespace SSOAuthAPI
             // Add services to the container.
             var services = builder.Services;
 
+            services.AddScoped<CustomCookieAuthenticationEvents>();
+
             services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
                     .AddCookie(CookieAuthenticationDefaults.AuthenticationScheme, options =>
                     {
                         options.LoginPath = builder.Configuration["FrontEndSettings:LoginPath"];
                         options.AccessDeniedPath = builder.Configuration["FrontEndSettings:AccessDeniedPath"];
+                        options.EventsType = typeof(CustomCookieAuthenticationEvents);
                         options.ExpireTimeSpan = TimeSpan.FromDays(30);
                         options.SlidingExpiration = true;
                         options.Cookie.HttpOnly = true;
@@ -73,17 +77,22 @@ namespace SSOAuthAPI
                     })
                     .AddServer(options =>
                     {
-                        options.SetTokenEndpointUris("/connect/token");
+                        options.AllowAuthorizationCodeFlow()
+                               .AllowRefreshTokenFlow()
+                               .AllowClientCredentialsFlow();
 
+                        options.SetTokenEndpointUris("/connect/token");
                         options.SetAuthorizationEndpointUris("/connect/authorize");
+
 
                         options.AddDevelopmentEncryptionCertificate().AddDevelopmentSigningCertificate().DisableAccessTokenEncryption();
 
-                        options.AllowAuthorizationCodeFlow().AllowRefreshTokenFlow().AllowClientCredentialsFlow();
-
                         options.RegisterScopes(OpenIddictConstants.Scopes.Email, "offline_access", "profile");
 
-                        options.UseAspNetCore().EnableTokenEndpointPassthrough().EnableAuthorizationEndpointPassthrough().EnableStatusCodePagesIntegration();
+                        options.UseAspNetCore()
+                               .EnableTokenEndpointPassthrough()
+                               .EnableAuthorizationEndpointPassthrough()
+                               .EnableStatusCodePagesIntegration();
                     });
 
             services.Configure<FrontEndSettings>(builder.Configuration.GetSection("FrontEndSettings"));
@@ -93,6 +102,7 @@ namespace SSOAuthAPI
             services.AddTransient<IUserService, UserService>();
             services.AddTransient<IUserClientService, UserClientService>();
             services.AddTransient<IProviderUserService, ProviderUserService>();
+            services.AddTransient<ISessionService, SessionService>();
 
 
             // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle

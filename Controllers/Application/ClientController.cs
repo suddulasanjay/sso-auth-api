@@ -31,5 +31,12 @@ namespace SSOAuthAPI.Controllers.Application
             return Ok(clientDetails);
         }
 
+        [HttpPut]
+        public async Task<IActionResult> Update([FromBody] ClientDto client)
+        {
+            var res = await _clientService.EditClientAsync(client);
+            return Ok(res);
+        }
+
     }
 }

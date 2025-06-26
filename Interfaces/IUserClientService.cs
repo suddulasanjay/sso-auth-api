@@ -8,7 +8,6 @@ namespace SSOAuthAPI.Interfaces
         Task AddUserClientAsync(UserClient userClient);
         Task<UserClient?> GetAsync(int userId, string appId);
         Task<bool> CanUserAccessClient(int userId, string appId, string requestedScope);
-        Task UpdateScopeIfNeeded(int userId, string appId, string requestedScope);
     }
 
 }

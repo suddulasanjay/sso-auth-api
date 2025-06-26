@@ -8,5 +8,6 @@ namespace SSOAuthAPI.Interfaces
         Task<User?> FindByIdAsync(int userId);
         Task<User> CreateUserAsync(string email, string firstname, string lastname, int providerId);
         Task UpdateLoginTimeAsync(int userId);
+        Task<Guid> LoginUserWithSession(User user);
     }
 }

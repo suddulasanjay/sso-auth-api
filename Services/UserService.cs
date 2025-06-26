@@ -8,10 +8,11 @@ namespace SSOAuthAPI.Services
 {
     public class UserService : IUserService
     {
+        private readonly ISessionService _sessionService;
         private readonly ApplicationDbContext _db;
-
-        public UserService(ApplicationDbContext db)
+        public UserService(ISessionService sessionService, ApplicationDbContext db)
         {
+            _sessionService = sessionService;
             _db = db;
         }
 
@@ -54,5 +55,13 @@ namespace SSOAuthAPI.Services
             await _db.SaveChangesAsync();
         }
 
+        public async Task<Guid> LoginUserWithSession(User user)
+        {
+            var sessionId = await _sessionService.BeginNewUserSession(user.Id);
+
+            await UpdateLoginTimeAsync(user.Id);
+
+            return sessionId;
+        }
     }
 }

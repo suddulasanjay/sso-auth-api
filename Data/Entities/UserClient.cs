@@ -16,6 +16,6 @@ namespace SSOAuthAPI.Data.Entities
 
         public string? Scope { get; set; }
 
-        public OpenIddictEntityFrameworkCoreApplication<string> App { get; set; } = default!;
+        public OpenIddictEntityFrameworkCoreApplication App { get; set; } = default!;
     }
 }

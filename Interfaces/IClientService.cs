@@ -6,5 +6,6 @@ namespace SSOAuthAPI.Interfaces
     {
         Task<ClientAppResponse> RegisterClientAsync(ClientDto dto);
         Task<ClientDto?> GetClientAsync(string clientId);
+        Task<ClientDto?> EditClientAsync(ClientDto dto);
     }
 }

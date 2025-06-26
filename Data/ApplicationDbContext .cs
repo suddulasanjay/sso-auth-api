@@ -6,7 +6,7 @@ namespace SSOAuthAPI.Data
 {
     public class ApplicationDbContext : DbContext
     {
-        public ApplicationDbContext(DbContextOptions options) : base(options)
+        public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options) : base(options)
         {
 
         }
@@ -28,11 +28,20 @@ namespace SSOAuthAPI.Data
         {
             base.OnModelCreating(builder);
 
+            builder.HasDefaultSchema("trans");
+
             builder.Entity<User>().HasIndex(u => u.Email).IsUnique();
 
             builder.Entity<ProviderUser>().HasIndex(pu => new { pu.ProviderId, pu.SubjectId }).IsUnique();
 
             builder.Entity<UserClient>().HasOne(uc => uc.App).WithMany().HasForeignKey(uc => uc.AppId).HasPrincipalKey(app => app.ClientId);
+        }
+
+        protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+        {
+            base.OnConfiguring(optionsBuilder);
+
+            optionsBuilder.UseSnakeCaseNamingConvention();
         }
     }
 }

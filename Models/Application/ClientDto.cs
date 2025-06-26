@@ -3,11 +3,12 @@
     public class ClientDto
     {
         public string ClientId { get; set; } = default!;
-        public string DisplayName { get; set; } = default!;
+        public string? DisplayName { get; set; }
         public string? ClientSecret { get; set; }
         public List<string> RedirectUris { get; set; } = new();
         public List<string> PostLogoutRedirectUris { get; set; } = new();
         public bool EnableClientCredentials { get; set; }
+        public bool CanGrantRefreshTokens { get; set; }
         public List<string> Permissions { get; set; } = new();
     }
 
