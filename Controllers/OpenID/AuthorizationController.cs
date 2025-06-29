@@ -289,7 +289,8 @@ namespace SSOAuthAPI.Controllers.OpenID
         [ProducesResponseType<UserInfoDto>(StatusCodes.Status200OK)]
         public async Task<IActionResult> Userinfo()
         {
-            bool hasProfileScope = HttpContext.User.HasClaim("scope", "profile");
+            var scopes = HttpContext.User.FindFirst("scope")?.Value?.Split(' ', StringSplitOptions.RemoveEmptyEntries) ?? Array.Empty<string>();
+            bool hasProfileScope = scopes.Contains("profile");
             if (!hasProfileScope)
             {
                 return Forbid("User Info Forbidden");
@@ -332,14 +333,24 @@ namespace SSOAuthAPI.Controllers.OpenID
         [HttpGet("~/connect/logout")]
         public async Task<IActionResult> Logout(string redirectTo = null)
         {
+            var auth = HttpContext.AuthenticateAsync(CookieAuthenticationDefaults.AuthenticationScheme).Result;
+
+            if (auth.Succeeded)
+            {
+                var sessionId = auth.Principal.FindFirstValue(CustomClaimTypes.SessionId);
+                if (!string.IsNullOrEmpty(sessionId))
+                    await _sessionService.EndSession(sessionId);
+            }
+
+            if (redirectTo == null)
+            {
+                redirectTo = "/";
+            }
+
+
             await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
 
-            return SignOut(
-                authenticationSchemes: OpenIddictServerAspNetCoreDefaults.AuthenticationScheme,
-                properties: new AuthenticationProperties
-                {
-                    RedirectUri = redirectTo ?? "/"
-                });
+            return Redirect(redirectTo);
         }
 
         private async Task<IActionResult> SignInUser(AuthenticateResult result, string clientId, string scope)

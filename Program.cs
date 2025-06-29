@@ -81,8 +81,9 @@ namespace SSOAuthAPI
                                .AllowRefreshTokenFlow()
                                .AllowClientCredentialsFlow();
 
-                        options.SetTokenEndpointUris("/connect/token");
-                        options.SetAuthorizationEndpointUris("/connect/authorize");
+                        options.SetTokenEndpointUris("/connect/token")
+                                .SetAuthorizationEndpointUris("/connect/authorize")
+                                .SetUserInfoEndpointUris("/connect/userinfo");
 
 
                         options.AddDevelopmentEncryptionCertificate().AddDevelopmentSigningCertificate().DisableAccessTokenEncryption();
@@ -91,6 +92,7 @@ namespace SSOAuthAPI
 
                         options.UseAspNetCore()
                                .EnableTokenEndpointPassthrough()
+                               .EnableUserInfoEndpointPassthrough()
                                .EnableAuthorizationEndpointPassthrough()
                                .EnableStatusCodePagesIntegration();
                     });
