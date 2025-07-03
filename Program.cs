@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.EntityFrameworkCore;
 using OpenIddict.Abstractions;
+using OpenIddict.Validation;
 using SSOAuthAPI.Data;
 using SSOAuthAPI.Filters;
 using SSOAuthAPI.Interfaces;
@@ -95,6 +96,27 @@ namespace SSOAuthAPI
                                .EnableUserInfoEndpointPassthrough()
                                .EnableAuthorizationEndpointPassthrough()
                                .EnableStatusCodePagesIntegration();
+                    })
+                    .AddValidation(options =>
+                    {
+                        options.UseLocalServer();
+                        options.UseAspNetCore();
+                        options.AddEventHandler<OpenIddictValidationEvents.ValidateTokenContext>(openIddictBuilder =>
+                            openIddictBuilder.UseInlineHandler(async context =>
+                            {
+                                if (context.RequestUri is not null)
+                                {
+                                    var audiences = builder.Configuration.GetSection("ResourceServer:ValidAudiences").Get<string[]>() ?? Array.Empty<string>();
+                                    foreach (var audience in audiences)
+                                    {
+                                        context.Options.Audiences.Add(audience);
+                                    }
+                                }
+                            }
+                        ).SetOrder(OpenIddictValidationHandlers.Protection.ValidateAudience.Descriptor.Order - 1));
+
+                        options.AddEventHandler<OpenIddictValidationEvents.ValidateTokenContext>(openIddictBuilder => openIddictBuilder.UseScopedHandler<CustomOpenIdDictValidationHandlers>());
+
                     });
 
             services.Configure<FrontEndSettings>(builder.Configuration.GetSection("FrontEndSettings"));
@@ -103,6 +125,7 @@ namespace SSOAuthAPI
             services.AddTransient<IClientService, ClientService>();
             services.AddTransient<IUserService, UserService>();
             services.AddTransient<IUserClientService, UserClientService>();
+            services.AddTransient<ITokenService, TokenService>();
             services.AddTransient<IProviderUserService, ProviderUserService>();
             services.AddTransient<ISessionService, SessionService>();
 

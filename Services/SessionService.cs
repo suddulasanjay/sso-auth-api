@@ -1,5 +1,4 @@
 ﻿using Microsoft.EntityFrameworkCore;
-using OpenIddict.Abstractions;
 using SSOAuthAPI.Data;
 using SSOAuthAPI.Data.Entities;
 using SSOAuthAPI.Interfaces;
@@ -9,10 +8,12 @@ namespace SSOAuthAPI.Services
 {
     public class SessionService : ISessionService
     {
+        private readonly ITokenService _tokenService;
         private readonly ApplicationDbContext _dbContext;
 
-        public SessionService(ApplicationDbContext dbContext)
+        public SessionService(ITokenService tokenService, ApplicationDbContext dbContext)
         {
+            _tokenService = tokenService;
             _dbContext = dbContext;
         }
 
@@ -67,29 +68,6 @@ namespace SSOAuthAPI.Services
             return false;
         }
 
-        public bool CheckMaxAgeForAuthorization(Session session, OpenIddictApplicationDescriptor application)
-        {
-            var maxAgeSettings = application.Settings.GetValueOrDefault("max_age");
-            if (int.TryParse(maxAgeSettings, out int maxAge))
-            {
-                if (maxAge <= 0)
-                    return true;
-
-                if (DateTime.UtcNow < session.LastAuthenticated.AddSeconds(maxAge))
-                {
-                    return false;
-                }
-            }
-
-            return true;
-        }
-
-        public async Task<bool> CheckMaxAgeForAuthorization(Guid sessionId, OpenIddictApplicationDescriptor application)
-        {
-            var session = await GetSessionById(sessionId);
-            return session != null && CheckMaxAgeForAuthorization(session, application);
-        }
-
         public async Task<bool> EndSession(string sessionId)
         {
             if (string.IsNullOrEmpty(sessionId)) return false;
@@ -101,6 +79,12 @@ namespace SSOAuthAPI.Services
                     .FirstOrDefaultAsync();
 
                 if (session == null) return false;
+
+                if (session.AuthorizationIds is not null)
+                {
+
+                    await _tokenService.RevokeTokensByAuthorizationIdAsync(session.AuthorizationIds);
+                }
 
                 session.Status = CommonStatus.Disabled;
                 await _dbContext.SaveChangesAsync();
