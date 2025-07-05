@@ -67,7 +67,7 @@ namespace SSOAuthAPI
 
             services.AddDbContext<ApplicationDbContext>(options =>
             {
-                options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection"));
+                options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection"));
                 options.UseOpenIddict();
             });
 
@@ -120,7 +120,7 @@ namespace SSOAuthAPI
                     });
 
             services.Configure<FrontEndSettings>(builder.Configuration.GetSection("FrontEndSettings"));
-            services.AddDbContext<ApplicationDbContext>(options => options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+            services.AddDbContext<ApplicationDbContext>(options => options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
 
             services.AddTransient<IClientService, ClientService>();
             services.AddTransient<IUserService, UserService>();
