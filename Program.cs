@@ -1,4 +1,3 @@
-
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.EntityFrameworkCore;
@@ -9,6 +8,7 @@ using SSOAuthAPI.Filters;
 using SSOAuthAPI.Interfaces;
 using SSOAuthAPI.Models.Configuration;
 using SSOAuthAPI.Services;
+using SSOAuthAPI.Services.Jobs;
 using System.Security.Claims;
 
 namespace SSOAuthAPI
@@ -128,7 +128,7 @@ namespace SSOAuthAPI
             services.AddTransient<ITokenService, TokenService>();
             services.AddTransient<IProviderUserService, ProviderUserService>();
             services.AddTransient<ISessionService, SessionService>();
-
+            services.AddScoped<IOpenIddictCleanupService, OpenIddictCleanupService>();
 
             // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
             services.AddEndpointsApiExplorer();

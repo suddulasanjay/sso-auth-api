@@ -13,17 +13,12 @@ namespace SSOAuthAPI.Services
     public class TokenService : ITokenService
     {
         private readonly OpenIddictValidationService _openIddictValidationService;
-        private readonly IOpenIddictApplicationManager _applicationManager;
         private readonly ApplicationDbContext _dbContext;
         private readonly IOpenIddictTokenManager _tokenManager;
 
-        public TokenService(OpenIddictValidationService openIddictValidationService,
-            IOpenIddictApplicationManager applicationManager,
-            ApplicationDbContext dbContext,
-            IOpenIddictTokenManager tokenManager)
+        public TokenService(OpenIddictValidationService openIddictValidationService, ApplicationDbContext dbContext, IOpenIddictTokenManager tokenManager)
         {
             _openIddictValidationService = openIddictValidationService;
-            _applicationManager = applicationManager;
             _dbContext = dbContext;
             _tokenManager = tokenManager;
         }
@@ -93,8 +88,13 @@ namespace SSOAuthAPI.Services
 
         public async Task RevokeTokensByAuthorizationIdAsync(IEnumerable<string> authids)
         {
-            await _dbContext.Tokens.Where(x => authids.Contains(x.Authorization.Id))
+            // Revoke Tokens
+            await _dbContext.Tokens.Where(x => authids.Contains(x.Authorization!.Id))
                 .ExecuteUpdateAsync(x => x.SetProperty(x => x.Status, OpenIddictConstants.Statuses.Revoked));
+
+            // Revoke authorizations
+            await _dbContext.Authorizations.Where(a => authids.Contains(a.Id))
+                .ExecuteUpdateAsync(a => a.SetProperty(x => x.Status, OpenIddictConstants.Statuses.Revoked));
         }
 
         private void PreserveApplicationClaims(ClaimsIdentity identity)

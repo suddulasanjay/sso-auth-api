@@ -2,6 +2,7 @@
 using SSOAuthAPI.Data;
 using SSOAuthAPI.Data.Entities;
 using SSOAuthAPI.Interfaces;
+using SSOAuthAPI.Services.Jobs;
 using SSOAuthAPI.Utilities.Constants;
 
 namespace SSOAuthAPI.Services
@@ -10,11 +11,13 @@ namespace SSOAuthAPI.Services
     {
         private readonly ITokenService _tokenService;
         private readonly ApplicationDbContext _dbContext;
+        private readonly IOpenIddictCleanupService _openIddictCleanupService;
 
-        public SessionService(ITokenService tokenService, ApplicationDbContext dbContext)
+        public SessionService(ITokenService tokenService, ApplicationDbContext dbContext, IOpenIddictCleanupService openIddictCleanupService)
         {
             _tokenService = tokenService;
             _dbContext = dbContext;
+            _openIddictCleanupService = openIddictCleanupService;
         }
 
         public async Task<Guid> BeginNewUserSession(int userId)
@@ -37,6 +40,18 @@ namespace SSOAuthAPI.Services
             _dbContext.Sessions.Add(session);
 
             await _dbContext.SaveChangesAsync();
+
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await _openIddictCleanupService.CleanupAsync();
+                }
+                catch (Exception ex)
+                {
+                    throw;
+                }
+            });
 
             return sessionId;
         }
