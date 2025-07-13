@@ -45,7 +45,7 @@ namespace SSOAuthAPI
                         options.ClaimActions.MapJsonKey("given_name", "given_name");
                         options.ClaimActions.MapJsonKey("family_name", "family_name");
                         options.SaveTokens = true;
-                        options.CorrelationCookie.SameSite = SameSiteMode.Lax;
+                        options.CorrelationCookie.SameSite = SameSiteMode.None;
                         options.CorrelationCookie.SecurePolicy = CookieSecurePolicy.Always;
                         options.CorrelationCookie.HttpOnly = true;
                     })
@@ -61,7 +61,18 @@ namespace SSOAuthAPI
                         options.ClaimActions.MapJsonKey(ClaimTypes.Surname, "surname");
                         options.ClaimActions.MapJsonKey("email", "email");
                     });
-            ;
+            //CORS
+            string MyAllowSpecificOrigins = "_myAllowSpecificOrigins";
+            builder.Services.AddCors(options =>
+            {
+                options.AddPolicy(MyAllowSpecificOrigins,
+                    x => x
+                        .WithOrigins(builder.Configuration.GetSection("Cors").GetSection("AllowedOrigins").Get<string[]>()!)
+                        .AllowAnyMethod()
+                        .WithExposedHeaders("Content-Disposition")
+                        .AllowAnyHeader()
+                        .AllowCredentials());
+            });
 
             services.AddControllers();
 
@@ -135,6 +146,7 @@ namespace SSOAuthAPI
             services.AddSwaggerGen();
 
             var app = builder.Build();
+            app.UseCors(MyAllowSpecificOrigins);
 
             // Configure the HTTP request pipeline.
             if (app.Environment.IsDevelopment())

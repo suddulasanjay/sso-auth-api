@@ -322,7 +322,7 @@ namespace SSOAuthAPI.Controllers.OpenID
                 Id = userId,
                 Email = user.Email,
                 FirstName = user.FirstName,
-                LastName = user.LastName,
+                LastName = user.LastName!,
                 Verified = user.Verified,
                 IsActive = user.Status == CommonStatus.Enabled
             };
@@ -331,7 +331,7 @@ namespace SSOAuthAPI.Controllers.OpenID
         }
 
         [HttpGet("~/connect/logout")]
-        public async Task<IActionResult> Logout(string redirectTo = null)
+        public async Task<IActionResult> Logout(string? redirectTo = null)
         {
             var auth = HttpContext.AuthenticateAsync(CookieAuthenticationDefaults.AuthenticationScheme).Result;
 
